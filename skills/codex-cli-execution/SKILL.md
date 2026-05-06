@@ -173,4 +173,4 @@ The helper's default `-p`:
 ## Out of scope (v1)
 
 - Resuming a prior Codex thread (each invocation = fresh session). Future work: an optional `--resume` flag on the slash command.
-- Multi-worker pools (see `icon-orchestrator-v2.md` for that pattern; it adds `state.json` and is overkill for single-session).
+- Multi-worker pool orchestration (parallel Codex workers under one supervisor with shared state). Single-session only.
