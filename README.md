@@ -33,11 +33,12 @@ Sometimes you want the *interactive* Codex experience — multi-turn back-and-fo
 - [Codex CLI](https://github.com/openai/codex) installed and authenticated (`codex` on `PATH`)
 - `tmux` (1.9+ recommended) and `bash` 4+
 - `shasum` *or* `sha1sum` (macOS ships `shasum`; most Linux distros ship `sha1sum`)
-- The [`tmux` skill](https://github.com/anthropics/skills) for Claude Code installed at `~/.claude/skills/tmux/` — the helper script in this repo composes on top of `~/.claude/skills/tmux/scripts/wait-for-text.sh`. If your `wait-for-text.sh` lives elsewhere, set the env var `WAIT_FOR_TEXT=/path/to/wait-for-text.sh`.
+
+That's it. **The `tmux` Claude Code skill that the supervisor helper depends on is bundled in this repo** and installed alongside `codex-cli-execution` — no external skill installation required. If you already have a `tmux` skill at `~/.claude/skills/tmux/`, the installer will skip it and leave yours untouched (use `--force` to overwrite).
 
 Optional:
 
-- The `iterm` skill (macOS only) — used silently if present to open a visible window attached to the agent's tmux session.
+- The `iterm` skill (macOS only) — used silently if present to open a visible window attached to the agent's tmux session. Not bundled.
 - The `codex:gpt-5-4-prompting` and `codex:codex-result-handling` skills from OpenAI's Codex plugin — referenced for prompt shaping and output discipline, not required.
 
 ## Installation
@@ -50,30 +51,29 @@ cd codex-cli-execution
 ./install.sh
 ```
 
-The installer copies the three files into `~/.claude/`, preserves the executable bit on the helper script, and refuses to clobber pre-existing files unless you pass `--force`.
+The installer copies both bundled skills (`codex-cli-execution` and the `tmux` skill it depends on) plus the slash command into `~/.claude/`, preserves executable bits on the helper scripts, and refuses to clobber pre-existing files unless you pass `--force`.
 
 ### Option B — manual
 
 ```bash
-mkdir -p ~/.claude/skills/codex-cli-execution/scripts ~/.claude/commands
+mkdir -p ~/.claude/commands ~/.claude/skills
 cp commands/codex-cli-execution.md ~/.claude/commands/
-cp skills/codex-cli-execution/SKILL.md ~/.claude/skills/codex-cli-execution/
-cp skills/codex-cli-execution/scripts/wait-for-codex-idle.sh \
-   ~/.claude/skills/codex-cli-execution/scripts/
+cp -R skills/codex-cli-execution ~/.claude/skills/
+cp -R skills/tmux                ~/.claude/skills/   # skip if you already have a tmux skill
 chmod +x ~/.claude/skills/codex-cli-execution/scripts/wait-for-codex-idle.sh
+chmod +x ~/.claude/skills/tmux/scripts/wait-for-text.sh
 ```
 
 ### Option C — symlink (for development)
 
-If you'd like to hack on the skill in place:
+If you'd like to hack on the skills in place:
 
 ```bash
 git clone https://github.com/shamrai-nikita/codex-cli-execution.git
-ln -s "$PWD/codex-cli-execution/commands/codex-cli-execution.md" \
-      ~/.claude/commands/codex-cli-execution.md
-ln -s "$PWD/codex-cli-execution/skills/codex-cli-execution" \
-      ~/.claude/skills/codex-cli-execution
+./codex-cli-execution/install.sh --symlink
 ```
+
+`--symlink` plants symlinks instead of copies, so edits to the cloned repo are picked up immediately by Claude Code.
 
 ## Usage
 
@@ -128,7 +128,7 @@ tmux -L agent.sock capture-pane -p -J -t codex-exec-XXXXXX:0.0 -S -200
 
 Then override the SKILL.md default by editing `skills/codex-cli-execution/SKILL.md` Step 5 to pass your own `-p`.
 
-`WAIT_FOR_TEXT` env var overrides the path to the upstream `wait-for-text.sh` helper.
+`WAIT_FOR_TEXT` env var overrides the path to the bundled `wait-for-text.sh` helper if you've installed it somewhere other than `~/.claude/skills/tmux/scripts/`.
 
 ## Caveats
 
@@ -145,19 +145,23 @@ Then override the SKILL.md default by editing `skills/codex-cli-execution/SKILL.
 ├── LICENSE                                              # MIT
 ├── install.sh                                           # idempotent installer
 ├── commands/
-│   └── codex-cli-execution.md                          # slash command entry
+│   └── codex-cli-execution.md                           # slash command entry
 └── skills/
-    └── codex-cli-execution/
-        ├── SKILL.md                                     # the playbook
+    ├── codex-cli-execution/
+    │   ├── SKILL.md                                     # the playbook
+    │   └── scripts/
+    │       └── wait-for-codex-idle.sh                   # idle-detection helper
+    └── tmux/                                            # bundled dependency
+        ├── SKILL.md                                     # tmux primitives reference
         └── scripts/
-            └── wait-for-codex-idle.sh                  # idle-detection helper
+            └── wait-for-text.sh                         # generic pane poller
 ```
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `wait-for-text.sh not executable at ...` | tmux skill not installed at the expected path | Install the [tmux skill](https://github.com/anthropics/skills), or set `WAIT_FOR_TEXT` env var |
+| `wait-for-text.sh not executable at ...` | The bundled tmux skill wasn't installed (e.g. `--symlink` against a moved repo, or manual install skipped) | Re-run `./install.sh`, or set `WAIT_FOR_TEXT=/path/to/wait-for-text.sh` if you keep yours elsewhere |
 | Helper exits 1 immediately | Codex never showed input chrome (e.g. auth error) | Attach to the session: `tmux -L agent.sock attach -t <session>` and look at the actual pane |
 | Helper exits 2 mid-run | Caught a default error keyword (`error:` / `denied` / etc.) | Read the last 80 lines printed; check whether it's a real failure or a benign log line, override `-e` if needed |
 | Multi-line prompt arrived mangled | Something used `send-keys` instead of `load-buffer | paste-buffer` | Skill should never do this; if it did, please open an issue |

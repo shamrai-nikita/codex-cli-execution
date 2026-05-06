@@ -34,25 +34,19 @@ done
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 src_cmd="$repo_root/commands/codex-cli-execution.md"
 src_skill_dir="$repo_root/skills/codex-cli-execution"
+src_tmux_dir="$repo_root/skills/tmux"
 
 claude_dir="$prefix/.claude"
 dst_cmd="$claude_dir/commands/codex-cli-execution.md"
 dst_skill_dir="$claude_dir/skills/codex-cli-execution"
+dst_tmux_dir="$claude_dir/skills/tmux"
 
 # Sanity checks
-[[ -f "$src_cmd" ]]            || { echo "missing: $src_cmd"            >&2; exit 1; }
-[[ -d "$src_skill_dir" ]]      || { echo "missing: $src_skill_dir"      >&2; exit 1; }
+[[ -f "$src_cmd" ]]       || { echo "missing: $src_cmd"       >&2; exit 1; }
+[[ -d "$src_skill_dir" ]] || { echo "missing: $src_skill_dir" >&2; exit 1; }
+[[ -d "$src_tmux_dir" ]]  || { echo "missing: $src_tmux_dir"  >&2; exit 1; }
 
-# Soft-warn on missing tmux skill (the helper depends on it)
-tmux_skill="$claude_dir/skills/tmux/scripts/wait-for-text.sh"
-if [[ ! -x "$tmux_skill" ]]; then
-  echo "WARNING: tmux skill not detected at $tmux_skill"
-  echo "         The helper script depends on it. Install the tmux skill"
-  echo "         (https://github.com/anthropics/skills) or set WAIT_FOR_TEXT before use."
-  echo
-fi
-
-mkdir -p "$claude_dir/commands" "$(dirname "$dst_skill_dir")"
+mkdir -p "$claude_dir/commands" "$claude_dir/skills"
 
 install_one() {
   local src="$1" dst="$2"
@@ -80,10 +74,15 @@ install_one() {
 
 install_one "$src_cmd"       "$dst_cmd"
 install_one "$src_skill_dir" "$dst_skill_dir"
+install_one "$src_tmux_dir"  "$dst_tmux_dir"
 
-# Ensure helper is executable (cp -R preserves mode but be explicit)
-helper="$dst_skill_dir/scripts/wait-for-codex-idle.sh"
-[[ -e "$helper" ]] && chmod +x "$helper" 2>/dev/null || true
+# Ensure helpers are executable (cp -R preserves mode but be explicit)
+for helper in \
+  "$dst_skill_dir/scripts/wait-for-codex-idle.sh" \
+  "$dst_tmux_dir/scripts/wait-for-text.sh"
+do
+  [[ -e "$helper" ]] && chmod +x "$helper" 2>/dev/null || true
+done
 
 echo
 echo "Done. In Claude Code, try:"
