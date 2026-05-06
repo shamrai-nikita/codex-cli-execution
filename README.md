@@ -163,16 +163,6 @@ Then override the SKILL.md default by editing `skills/codex-cli-execution/SKILL.
 | Multi-line prompt arrived mangled | Something used `send-keys` instead of `load-buffer | paste-buffer` | Skill should never do this; if it did, please open an issue |
 | `tmux: server not found` errors | Stale `agent.sock` socket | `tmux -L agent.sock kill-server` and retry |
 
-## Related / prior art
-
-- **[OpenAI's Codex Claude Code plugin](https://github.com/openai/codex)** — provides `codex:rescue`, `codex:setup`, and the `codex-companion` JSON-RPC runtime. Different mechanism (no TUI).
-- **`codex-subagents`** ([codex-as-mcp](https://github.com/shyamz-22/codex-as-mcp) and forks) — orchestrates parallel Codex subagents via one-shot `codex e`. Useful when you need fan-out, not interactive.
-- **`icon-orchestrator-v2`** — a multi-worker pool variant with `state.json`, `cycle.sh`, and `ScheduleWakeup(240s)`-paced supervision. The reusable mental model behind this skill, scaled down to single-session.
-
-## Contributing
-
-Issues and PRs welcome. The skill follows the [superpowers writing-skills](https://github.com/obra/superpowers) TDD discipline — if you change behavior, please describe the failing test scenario you observed without your change.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
