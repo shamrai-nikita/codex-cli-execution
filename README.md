@@ -103,7 +103,7 @@ You can also just say *"drive Codex via tmux to do X"* — the skill is model-in
 
 ### Open multiple Codex workers
 
-Each invocation gets a unique session name, so calling the slash command twice in a row spawns two independent Codex workers you can supervise in parallel. (For full multi-worker pool orchestration with state tracking, see [icon-orchestrator-v2](#related-prior-art) — out of scope here.)
+Each invocation gets a unique session name, so calling the slash command twice in a row spawns two independent Codex workers you can supervise in parallel.
 
 ## Configuration
 
