@@ -28,10 +28,10 @@ Required:
 Options:
   -T, --timeout      total seconds to wait (default: 600)
   -p, --pattern      regex matching Codex input chrome
-                     (default: '▌ Send a message|esc to interrupt|tokens used|↑/↓ history')
+                     (default: '^›|gpt-[0-9]+\.[0-9]+ \w+|YOLO mode|▌ Send a message|esc to interrupt|tokens used|↑/↓ history')
   -s, --stability    seconds the pane hash must stay constant after chrome appears (default: 3)
   -e, --error-regex  regex of failure keywords; if matched, exit 2
-                     (default: 'error:|denied|permission|command failed|refused')
+                     (default: 'error:|denied|permission denied|command failed|refused')
   -l, --lines        history lines to capture (default: 2000)
   -i, --interval     poll interval seconds passed to wait-for-text.sh (default: 0.5)
   -q, --quiet        suppress info logging (errors still go to stderr)
@@ -47,9 +47,12 @@ USAGE
 
 target=""
 timeout=600
-pattern='▌ Send a message|esc to interrupt|tokens used|↑/↓ history'
+# Default sentinel covers Codex CLI v0.128+ chrome (`›` prompt arrow + `gpt-X.Y model`
+# status line + boot-banner "YOLO mode") AND the older v0.x chrome strings, so the same
+# helper works across builds. Override with -p if a future build changes things again.
+pattern='^›|gpt-[0-9]+\.[0-9]+ \w+|YOLO mode|▌ Send a message|esc to interrupt|tokens used|↑/↓ history'
 stability=3
-error_regex='error:|denied|permission|command failed|refused'
+error_regex='error:|denied|permission denied|command failed|refused'
 lines=2000
 interval=0.5
 quiet=0
@@ -113,7 +116,7 @@ rem=$(remaining)
 (( rem > 0 )) || { echo "timeout before chrome wait started" >&2; exit 1; }
 log "phase 1/2: waiting up to ${rem}s for Codex input chrome..."
 
-if ! "$WAIT_FOR_TEXT" -t "$target" -p "$pattern" -T "$rem" -i "$interval" -l "$lines" >/dev/null 2>&1; then
+if ! "$WAIT_FOR_TEXT" -L agent.sock -t "$target" -p "$pattern" -T "$rem" -i "$interval" -l "$lines" >/dev/null 2>&1; then
   txt="$(capture)"
   echo "timeout: Codex input chrome not detected within ${timeout}s" >&2
   printf '%s\n' "$txt" | tail -n 80 >&2

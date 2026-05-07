@@ -148,15 +148,15 @@ Default = **delegate**. Compose a corrective prompt and loop back to Step 4 (pas
 8. Don't `capture-pane` outside Steps 4 (paste verify), 5 (supervise), and 7 (evaluate).
 9. Per-invocation session names (`codex-exec-HHMMSS`) — never collide with existing sessions.
 
-## Codex TUI sentinel regex (interim)
+## Codex TUI sentinel regex
 
-The helper's default `-p`:
+The helper's default `-p` covers both modern and legacy Codex CLI chrome:
 
 ```
-▌ Send a message|esc to interrupt|tokens used|↑/↓ history
+^›|gpt-[0-9]+\.[0-9]+ \w+|YOLO mode|▌ Send a message|esc to interrupt|tokens used|↑/↓ history
 ```
 
-**TODO:** tighten empirically on first real run — capture the pane right after `codex --yolo` boots, identify the persistently-rendered input chrome on this Codex build, and override via `-p` if needed. Codex versions can change the chrome.
+The first three alternatives (the input-arrow `›`, the `gpt-X.Y <variant>` status line, and the `YOLO mode` boot banner) match Codex CLI v0.128+. The remainder preserves compatibility with older v0.x chrome. If a future build replaces these too, capture the pane post-boot and override via `-p`.
 
 ## Common mistakes
 
