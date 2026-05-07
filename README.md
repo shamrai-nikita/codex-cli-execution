@@ -29,12 +29,20 @@ Sometimes you want the *interactive* Codex experience — multi-turn back-and-fo
 
 ## Prerequisites
 
+Required:
+
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed
-- [Codex CLI](https://github.com/openai/codex) installed and authenticated (`codex` on `PATH`)
-- `tmux` (1.9+ recommended) and `bash` 4+
+- [Codex CLI](https://github.com/openai/codex) installed and authenticated (`codex` on `PATH`) — the installer hard-fails without it
+- `bash` 3.2+ (the macOS default works)
 - `shasum` *or* `sha1sum` (macOS ships `shasum`; most Linux distros ship `sha1sum`)
 
-That's it. **The `tmux` Claude Code skill that the supervisor helper depends on is bundled in this repo** and installed alongside `codex-cli-execution` — no external skill installation required. If you already have a `tmux` skill at `~/.claude/skills/tmux/`, the installer will skip it and leave yours untouched (use `--force` to overwrite).
+Auto-installed by `install.sh` if missing:
+
+- `tmux` (1.9+) — installed via Homebrew on macOS, or apt/dnf/yum/pacman/apk/zypper on Linux. Pass `--no-install-deps` to opt out (the installer will print the exact command and exit).
+
+Bundled in this repo (no separate install needed):
+
+- The `tmux` Claude Code skill the supervisor helper depends on. If you already have a `tmux` skill at `~/.claude/skills/tmux/`, the installer skips it and leaves yours untouched (use `--force` to overwrite).
 
 Optional:
 
@@ -51,7 +59,23 @@ cd codex-cli-execution
 ./install.sh
 ```
 
-The installer copies both bundled skills (`codex-cli-execution` and the `tmux` skill it depends on) plus the slash command into `~/.claude/`, preserves executable bits on the helper scripts, and refuses to clobber pre-existing files unless you pass `--force`.
+The installer:
+
+1. **Verifies prerequisites** — fails fast if `codex` isn't on `PATH`; warns if `claude` isn't.
+2. **Auto-installs `tmux`** if missing (Homebrew on macOS, or the local Linux package manager: apt/dnf/yum/pacman/apk/zypper). `sudo` is invoked when you're not root. Pass `--no-install-deps` to opt out — the installer will print the exact command it would have run and exit 1.
+3. **Copies the skill files** (both bundled skills + the slash command) into `~/.claude/`, preserves executable bits on the helper scripts, and refuses to clobber pre-existing files unless you pass `--force`.
+
+After install, **restart any open Claude Code sessions** so the new slash command and skills are picked up.
+
+Useful flags:
+
+| Flag | Purpose |
+|---|---|
+| `--force` | Overwrite existing files at the destination |
+| `--prefix DIR` | Install into `DIR/.claude` instead of `$HOME/.claude` |
+| `--symlink` | Plant symlinks instead of copies (good for hacking on the repo in place) |
+| `--no-install-deps` | Don't auto-install `tmux`; fail with a printed install command |
+| `--skip-deps` | Skip dependency checks entirely (advanced) |
 
 ### Option B — manual
 
@@ -113,9 +137,10 @@ The helper accepts these flags (full list: `wait-for-codex-idle.sh -h`):
 |---|---|---|
 | `-t` | required | tmux target, e.g. `codex-exec-093015:0.0` |
 | `-T` | `600` | total seconds before timeout |
-| `-p` | `▌ Send a message\|esc to interrupt\|tokens used\|↑/↓ history` | input-chrome regex |
+| `-p` | `^›\|gpt-[0-9]+\.[0-9]+ \w+\|YOLO mode\|▌ Send a message\|esc to interrupt\|tokens used\|↑/↓ history` | input-chrome regex (covers Codex CLI v0.128+ and legacy v0.x builds) |
 | `-s` | `3` | seconds the pane hash must stay stable |
-| `-e` | `error:\|denied\|permission\|command failed\|refused` | error-keyword regex (exit 2 on match) |
+| `-e` | `error:\|denied\|permission denied\|command failed\|refused` | error-keyword regex (exit 2 on match) |
+| `-L` | `agent.sock` | tmux socket name (passed to the bundled `wait-for-text.sh` helper) |
 | `-l` | `2000` | history lines to capture |
 | `-i` | `0.5` | poll interval (passed through to `wait-for-text.sh`) |
 
@@ -161,6 +186,9 @@ Then override the SKILL.md default by editing `skills/codex-cli-execution/SKILL.
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| `/codex-cli-execution` doesn't appear / "skill wasn't invoked" | Claude Code only scans `~/.claude/commands` and `~/.claude/skills` at session start | Quit and restart Claude Code, then re-try. Confirm files exist: `ls ~/.claude/commands/codex-cli-execution.md ~/.claude/skills/codex-cli-execution` |
+| `tmux: command not found` after install | Installer ran with `--no-install-deps` or auto-install failed | Re-run `./install.sh` (default mode), or install tmux manually (`brew install tmux` / `apt-get install tmux` / etc.) and re-run with `--skip-deps` |
+| `codex CLI not found in PATH` during install | Codex CLI isn't installed or isn't on `PATH` | Install from https://github.com/openai/codex, ensure it's on `PATH`, then re-run `./install.sh` |
 | `wait-for-text.sh not executable at ...` | The bundled tmux skill wasn't installed (e.g. `--symlink` against a moved repo, or manual install skipped) | Re-run `./install.sh`, or set `WAIT_FOR_TEXT=/path/to/wait-for-text.sh` if you keep yours elsewhere |
 | Helper exits 1 immediately | Codex never showed input chrome (e.g. auth error) | Attach to the session: `tmux -L agent.sock attach -t <session>` and look at the actual pane |
 | Helper exits 2 mid-run | Caught a default error keyword (`error:` / `denied` / etc.) | Read the last 80 lines printed; check whether it's a real failure or a benign log line, override `-e` if needed |
