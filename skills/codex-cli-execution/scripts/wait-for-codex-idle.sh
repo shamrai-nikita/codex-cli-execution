@@ -34,14 +34,18 @@ Options:
                      (default: 'error:|denied|permission denied|command failed|refused')
   -l, --lines        history lines to capture (default: 2000)
   -i, --interval     poll interval seconds passed to wait-for-text.sh (default: 0.5)
+  -m, --result-marker regex of a result-block start line; if matched in the pane,
+                     surface from that line to the end (capped) instead of the
+                     last 80 lines (default: '=== CODEX RESULT ===')
   -q, --quiet        suppress info logging (errors still go to stderr)
   -h, --help         show this help
 
 Notes:
   - Always uses the agent.sock private socket (`tmux -L agent.sock`).
   - Composes the tmux skill's wait-for-text.sh for the chrome match.
-  - Prints the last 80 lines of the pane to stdout on success so the caller
-    can read what Codex finished with.
+  - Surfaces the result block (from --result-marker) when present, else the last
+    80 lines, on success/error/timeout — so the caller reads dense signal, not a
+    full scrollback dump. The 2000-line internal captures never leave this process.
 USAGE
 }
 
@@ -55,19 +59,21 @@ stability=3
 error_regex='error:|denied|permission denied|command failed|refused'
 lines=2000
 interval=0.5
+result_marker='=== CODEX RESULT ==='
 quiet=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -t|--target)      target="${2-}"; shift 2 ;;
-    -T|--timeout)     timeout="${2-}"; shift 2 ;;
-    -p|--pattern)     pattern="${2-}"; shift 2 ;;
-    -s|--stability)   stability="${2-}"; shift 2 ;;
-    -e|--error-regex) error_regex="${2-}"; shift 2 ;;
-    -l|--lines)       lines="${2-}"; shift 2 ;;
-    -i|--interval)    interval="${2-}"; shift 2 ;;
-    -q|--quiet)       quiet=1; shift ;;
-    -h|--help)        usage; exit 0 ;;
+    -t|--target)        target="${2-}"; shift 2 ;;
+    -T|--timeout)       timeout="${2-}"; shift 2 ;;
+    -p|--pattern)       pattern="${2-}"; shift 2 ;;
+    -s|--stability)     stability="${2-}"; shift 2 ;;
+    -e|--error-regex)   error_regex="${2-}"; shift 2 ;;
+    -l|--lines)         lines="${2-}"; shift 2 ;;
+    -i|--interval)      interval="${2-}"; shift 2 ;;
+    -m|--result-marker) result_marker="${2-}"; shift 2 ;;
+    -q|--quiet)         quiet=1; shift ;;
+    -h|--help)          usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 3 ;;
   esac
 done
@@ -89,6 +95,23 @@ hash_cmd() {
 
 log() { (( quiet )) || echo "[wait-for-codex-idle] $*" >&2; }
 
+# Surface dense signal to the caller: if the result-block marker is present,
+# print from its last occurrence to the end (capped at 120 lines); otherwise
+# fall back to the last 80 lines. The full 2000-line capture never leaves here.
+surface() {
+  local txt="$1" start=""
+  if [[ -n "$result_marker" ]]; then
+    # `|| true`: grep exits 1 when the marker is absent; without this, pipefail +
+    # set -e would kill the script before the tail-n-80 fallback can run.
+    start="$(printf '%s\n' "$txt" | grep -nE -- "$result_marker" 2>/dev/null | tail -n 1 | cut -d: -f1 || true)"
+  fi
+  if [[ -n "$start" ]]; then
+    printf '%s\n' "$txt" | tail -n "+${start}" | tail -n 120
+  else
+    printf '%s\n' "$txt" | tail -n 80
+  fi
+}
+
 # Resolve the tmux skill's wait-for-text.sh helper.
 WAIT_FOR_TEXT="${WAIT_FOR_TEXT:-$HOME/.claude/skills/tmux/scripts/wait-for-text.sh}"
 [[ -x "$WAIT_FOR_TEXT" ]] || { echo "wait-for-text.sh not executable at $WAIT_FOR_TEXT" >&2; exit 3; }
@@ -106,7 +129,7 @@ check_error() {
   local txt="$1"
   if printf '%s\n' "$txt" | grep -E -- "$error_regex" >/dev/null 2>&1; then
     log "error keyword matched: $error_regex"
-    printf '%s\n' "$txt" | tail -n 80
+    surface "$txt"
     exit 2
   fi
 }
@@ -119,7 +142,7 @@ log "phase 1/2: waiting up to ${rem}s for Codex input chrome..."
 if ! "$WAIT_FOR_TEXT" -L agent.sock -t "$target" -p "$pattern" -T "$rem" -i "$interval" -l "$lines" >/dev/null 2>&1; then
   txt="$(capture)"
   echo "timeout: Codex input chrome not detected within ${timeout}s" >&2
-  printf '%s\n' "$txt" | tail -n 80 >&2
+  surface "$txt" >&2
   exit 1
 fi
 
@@ -137,7 +160,7 @@ while true; do
     quiet_for=$(( quiet_for + 1 ))
     if (( quiet_for >= stability )); then
       log "idle confirmed."
-      printf '%s\n' "$txt" | tail -n 80
+      surface "$txt"
       exit 0
     fi
   else
@@ -148,7 +171,7 @@ while true; do
   now=$(date +%s)
   if (( now >= deadline )); then
     echo "timeout: pane never stabilized within ${timeout}s" >&2
-    printf '%s\n' "$txt" | tail -n 80 >&2
+    surface "$txt" >&2
     exit 1
   fi
 
