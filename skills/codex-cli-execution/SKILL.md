@@ -115,19 +115,19 @@ bash "$HOME/.claude/skills/codex-cli-execution/scripts/wait-for-codex-idle.sh" \
   -t "$SESSION":0.0 -T 600 --result-marker '=== CODEX RESULT ==='
 ```
 
-It composes the tmux skill's `wait-for-text.sh` for the input-chrome regex and adds a SHA-stability check. Exit codes: `0` idle / `1` timeout / `2` error keyword detected / `3` bad args.
+It composes the tmux skill's `wait-for-text.sh` for the input-chrome regex and adds a SHA-stability check. Exit codes: `0` done (idle + result marker) / `1` timeout / `2` error keyword in recent output / `3` bad args / `4` session/pane gone / `5` idle but result marker absent (unconfirmed).
 
 **Why background:** the helper polls `capture-pane` internally (2000 lines/poll) but those captures stay inside the bash process — only its final output (≤80 lines, or the `=== CODEX RESULT ===` block) ever reaches Claude. Run in the *foreground* it gets killed by the Bash tool's 2-min default timeout (the status-line regex matches instantly, so the helper sits in the stability loop, and the pane never stabilizes while Codex works), which forces you into ad-hoc `capture-pane` polling that floods the context. Background-launched, the helper owns its own `-T` lifetime and the harness re-invokes you with its output **once, on exit**.
 
 - **Do NOT manually `capture-pane` while the helper is running** — it is the only progress signal. Repeated live-TUI captures are the single biggest context sink.
 - **Do NOT `ScheduleWakeup`-poll your own helper:** background Bash is harness-tracked, so the harness notifies you automatically when it exits. (A long wait costs one prompt-cache miss on re-invoke — a latency/cost cost, not a context cost, and far cheaper than the captures it replaces.) Reserve `ScheduleWakeup` for genuinely external waits; if ever used, its status check must be a bounded grepped/tailed capture, never a raw dump.
-- **On exit:** `0` → idle, read the surfaced result block; `1` → timeout: if Codex is still active, relaunch the background helper (each relaunch surfaces ≤80 lines; raise `-T` for known-long tasks); `2` → error keyword: surface to the user immediately.
+- **On exit:** `0` → done, read the surfaced `=== CODEX RESULT ===` block; `1` → timeout: if Codex is still active, relaunch the background helper (each relaunch surfaces ≤80 lines; raise `-T` for known-long tasks); `2` → error keyword in recent output: surface to the user immediately; `4` → session/pane gone (Codex crashed or the session was killed): surface to the user, **do not** report success; `5` → pane quiet but no result block: completion is **unconfirmed** — do not assume done. Relaunch the background helper once; if it returns `5` again, do a single bounded `grep`/`tail` capture to check for a pending prompt (`(y/n)|approve|continue\?|press`) before deciding.
 
-The helper surfaces any line matching `error:|denied|permission|command failed|refused` on its error-exit path — relay those to the user; don't paper over.
+The helper surfaces any line matching `error:|denied|permission denied|command failed|refused` (within its recent output) on its error-exit path — relay those to the user; don't paper over.
 
 ### Step 6 — Detect completion
 
-The helper's exit `0` (delivered via the background-task completion notification) is the completion signal: input chrome visible AND pane content stable for ≥3s. The helper surfaces the `=== CODEX RESULT ===` block when present, else the last 80 lines — reason about what Codex did from that, not from a fresh capture.
+The helper's exit `0` (delivered via the background-task completion notification) is the **confirmed-done** signal: pane content stable AND the worker no longer running AND the `=== CODEX RESULT ===` block present. The helper surfaces that block — reason about what Codex did from it, not from a fresh capture. Exit `5` means the pane went quiet *without* the result block (done-without-marker, or blocked at a prompt): treat completion as unconfirmed per Step 5 — don't evaluate it as success.
 
 ### Step 7 — Evaluate
 
@@ -142,7 +142,7 @@ git diff --stat
 
 ```bash
 tmux -L agent.sock capture-pane -p -J -t "$SESSION":0.0 -S -2000 \
-  | grep -E 'error:|denied|permission|command failed|refused' | tail -n 30
+  | grep -E 'error:|denied|permission denied|command failed|refused' | tail -n 30
 ```
 
 Apply `codex:codex-result-handling` discipline: preserve Codex's verdict/findings/touched-files structure when reporting back to the user; don't auto-apply fixes from a review-style output.
@@ -151,7 +151,7 @@ Decide: **success / partial / failure**.
 
 ### Step 8 — Follow up
 
-Default = **delegate**. Compose a corrective prompt and loop back to Step 4 (paste + submit again) on the **same** session. After the second failed correction, surface the situation to the user and ask whether to take over manually. Take-over is the exception, not the default.
+Default = **delegate**. Compose a corrective prompt and loop back to Step 4 (paste + submit again) on the **same** session, then **re-run Step 5 (relaunch the background supervise helper)** — don't skip supervision on the retry. After the second failed correction, surface the situation to the user and ask whether to take over manually. Take-over is the exception, not the default.
 
 ### Step 9 — Teardown
 
@@ -165,7 +165,7 @@ Default = **delegate**. Compose a corrective prompt and loop back to Step 4 (pas
 4. Never raw `send-keys` for multi-line content — always `load-buffer` + `paste-buffer`.
 5. Always print the monitor command at spawn AND at end of turn.
 6. Run the Step 5 supervise helper as a background Bash task (`run_in_background`) and rely on the harness completion notification. Never busy-poll the pane while it runs, and never `ScheduleWakeup`-poll your own background helper.
-7. Surface Codex denials / errors / refusals to the user immediately.
+7. Surface Codex denials / errors / refusals to the user immediately. Helper exit `4` (session gone) and `5` (quiet, no result block) are **not** success — surface or relaunch, never report done on them.
 8. Don't `capture-pane` outside Steps 4 (paste verify) and 7 (evaluate). Never `capture-pane` while the Step 5 helper runs — the background helper is the only progress signal. Step 7 scrollback reads must be `grep`/`tail`-filtered.
 9. Per-invocation session names (`codex-exec-HHMMSS`) — never collide with existing sessions.
 
@@ -179,6 +179,8 @@ The helper's default `-p` covers both modern and legacy Codex CLI chrome:
 
 The first three alternatives (the input-arrow `›`, the `gpt-X.Y <variant>` status line, and the `YOLO mode` boot banner) match Codex CLI v0.128+. The remainder preserves compatibility with older v0.x chrome. If a future build replaces these too, capture the pane post-boot and override via `-p`.
 
+The helper also exposes three gates that make `exit 0` trustworthy: `--running-pattern` (default `esc to interrupt`; while visible in a stable frame the worker is treated as still executing, so a momentarily-quiet pane isn't mistaken for done — set `''` to disable), `--error-scan-lines` (default `40`; bounds error-keyword detection to recent output so a benign `error:` up the scrollback can't abort a healthy run), and `--result-marker` (the `=== CODEX RESULT ===` block that gates a confirmed `exit 0` vs. an unconfirmed `exit 5`).
+
 ## Common mistakes
 
 | Mistake | Fix |
@@ -191,6 +193,7 @@ The first three alternatives (the input-arrow `›`, the `gpt-X.Y <variant>` sta
 | Killing the session before user inspects | Default to leave-running; require explicit confirmation to kill. |
 | Skipping monitor-command print at spawn | tmux-skill rule — always print it, twice. |
 | Capturing scrollback with `-S -200` and missing earlier denials | Capture `-S -2000` but always pipe through `grep`/`tail`; never surface a raw 2000-line dump into context. Or launch Codex with `--no-alt-screen` if the build supports it (trade-off: TUI renders less cleanly). |
+| Treating a quiet pane / helper `exit 0` as "done" without the result block | `exit 0` already requires the `=== CODEX RESULT ===` block in a non-running pane. `exit 5` = unconfirmed (relaunch once, then check for a pending prompt); `exit 4` = session died. Never barge a follow-up into a still-working agent. |
 
 ## Out of scope (v1)
 
