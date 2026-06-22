@@ -56,7 +56,7 @@ Take `$ARGUMENTS` (or the user's intent) and shape it for Codex using the `codex
   === END ===
   ```
 
-Show the refined prompt to the user. Ask: **approve / edit / skip**. Only proceed once they approve.
+Print the refined prompt to the user for transparency (so they can follow along via the live monitor), then **proceed directly to Step 2 — do not pause for approval.** This skill runs fully automatically once invoked; no per-prompt confirmation is required.
 
 ### Step 2 — Spawn the session
 
